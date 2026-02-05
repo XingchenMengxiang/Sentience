@@ -1,0 +1,30 @@
+beautifulsoup4==4.14.3
+Bottleneck @ file:///opt/miniconda3/conda-bld/bottleneck_1761937852211/work
+bs4==0.0.2
+certifi==2026.1.4
+charset-normalizer==3.4.4
+idna==3.11
+joblib @ file:///Users/ec2-user/croot/joblib_1767868079254/work
+lxml==6.0.2
+numexpr @ file:///opt/miniconda3/conda-bld/numexpr_1762165518100/work
+numpy @ file:///Users/ec2-user/croot/numpy_and_numpy_base_1768376200011/work/dist/numpy-2.4.1-cp313-cp313-macosx_12_0_arm64.whl#sha256=3b714995ac0ff7924f104fe7f63d06a39b53590e924be0ed6f97c6d324a182b4
+packaging @ file:///opt/miniconda3/conda-bld/packaging_1761049079023/work
+pandas @ file:///opt/miniconda3/conda-bld/pandas_1762332179809/work/dist/pandas-2.3.3-cp313-cp313-macosx_12_0_arm64.whl#sha256=e15ab5e76dfcac9817c2633549d6e4cb87e6a735ade38ff7afbfa488f280b9ba
+python-dateutil @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/python-dateutil_1728585579455/work
+pytz @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_3bjczh6it0/croot/pytz_1752135865541/work
+requests==2.32.5
+scikit-learn @ file:///Users/ec2-user/croot/scikit-learn_1766097934589/work
+scipy @ file:///opt/miniconda3/conda-bld/scipy_1762194748151/work/dist/scipy-1.16.3-cp313-cp313-macosx_12_0_arm64.whl#sha256=3b04b7058e0eaf4429c87ae07f579c05c0eede9297525893d9a04959c82a4908
+setuptools==80.10.2
+simplejson==3.20.2
+six @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_03myqm7p6o/croot/six_1744271511946/work
+soupsieve==2.8.3
+threadpoolctl @ file:///opt/miniconda3/conda-bld/threadpoolctl_1764361580435/work
+tqdm==4.67.3
+tushare==1.4.24
+typing_extensions==4.15.0
+tzdata @ file:///home/task_176829656558347/croot/python-tzdata_1768296637279/work
+urllib3==2.6.3
+websocket-client==1.9.0
+wheel==0.46.3
+xgboost @ file:///opt/miniconda3/conda-bld/xgboost-split_1764761340699/work/python-package
