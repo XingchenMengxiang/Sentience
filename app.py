@@ -11,9 +11,7 @@ pip install pandas numpy scikit-learn xgboost
 from __future__ import annotations
 import os
 import glob
-import math
-from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -21,65 +19,16 @@ import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.preprocessing import RobustScaler
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import ParameterGrid
 
 from xgboost import XGBClassifier
-
-
-# -----------------------------
-# 1) Config
-# -----------------------------
-@dataclass
-class Config:
-    data_dir: str = "./data"      # folder containing csv files
-    window: int = 22              # use 22 trading days (covers 18~22)
-    label_mode: str = "online"    # "online" or "vconfirm"
-    horizon: int = 22             # only for vconfirm labels (18~22 recommended)
-    test_years: int = 1           # last N years for final test split
-    min_rows: int = 260           # at least ~1yr trading days to be usable
-
-    # Online label thresholds (tuneable)
-    theta_r22: float = 0.03       # |R_22| boundary for sideways
-    theta_down_r22: float = 0.06  # R_22 < -0.06 => down
-    theta_dd22: float = 0.08      # drawdown < -0.08 => down
-    theta_up_r10: float = 0.04    # R_10 > 0.04 => recovery candidate
-    theta_rebound: float = 0.06   # rebound from 22d low > 0.06 => recovery
-
-    # V-confirm label thresholds (tuneable)
-    v_drop: float = 0.10          # drop from recent high to low >= 10%
-    v_recover: float = 0.80       # recover >= 80% of the drop within horizon
-    v_fastdrop_days: int = 7      # low occurs within 7 days after high (fast drop)
-
-    random_state: int = 42
-
-
-CFG = Config(
-    data_dir="./data",
-    window=22,
-    label_mode="online",  # change to "vconfirm" to use future-confirmed V labels
-    horizon=22
-)
-
-
-# -----------------------------
-# 2) Stock universe mapping (optional)
-# -----------------------------
-NAME_TO_CODE: Dict[str, str] = {
-    "河化股份": "000953.SZ",
-    "卓翼科技": "002369.SZ",
-    "上海电气": "601727.SH",
-    "全聚德": "002186.SZ",
-    "孩子王": "301078.SZ",
-    "华谊集团": "600623.SH",
-    "宝信软件": "600845.SH",
-    "铭普光磁": "002902.SZ",
-}
+from stock_pool import StockPool, fetch_daily_data
+from config import CFG, Config
 
 
 # -----------------------------
 # 3) Data loading
 # -----------------------------
-def load_one_csv(path: str) -> pd.DataFrame:
+def load_one_csv(path: str, cfg: Config) -> pd.DataFrame:
     df = pd.read_csv(path)
     # normalize date
     if "trade_date" not in df.columns:
@@ -89,8 +38,7 @@ def load_one_csv(path: str) -> pd.DataFrame:
     df["trade_date"] = pd.to_datetime(df["trade_date"], format="%Y%m%d")
 
     # required columns
-    required = ["open", "high", "low", "close", "vol"]
-    for c in required:
+    for c in cfg.required_cols:
         if c not in df.columns:
             raise ValueError(f"Missing column {c} in {path}")
 
@@ -98,35 +46,36 @@ def load_one_csv(path: str) -> pd.DataFrame:
     return df
 
 
-def load_universe(data_dir: str) -> Dict[str, pd.DataFrame]:
+def load_universe(cfg: Config) -> Dict[str, pd.DataFrame]:
     """
     Accept either:
     - files named like 000953.SZ.csv
     - or Chinese names like 河化股份.csv
     """
-    files = glob.glob(os.path.join(data_dir, "*.csv"))
+    files = glob.glob(os.path.join(cfg.data_dir, "*.csv"))
     if not files:
-        raise FileNotFoundError(f"No CSV files found in {data_dir}")
+        raise FileNotFoundError(f"No CSV files found in {cfg.data_dir}")
 
     out: Dict[str, pd.DataFrame] = {}
     for f in files:
         base = os.path.splitext(os.path.basename(f))[0]
         ts_code = None
-        if base in NAME_TO_CODE:
-            ts_code = NAME_TO_CODE[base]
+        if base in cfg.stocks:
+            ts_code = cfg.stocks[base]
         elif base.endswith(".SZ") or base.endswith(".SH"):
             ts_code = base
         else:
             # unknown file naming
             continue
 
-        df = load_one_csv(f)
+        df = load_one_csv(f, cfg)
         df["ts_code"] = ts_code
         out[ts_code] = df
 
-    # Keep only the specified 8 if present
-    wanted = set(NAME_TO_CODE.values())
-    out = {k: v for k, v in out.items() if k in wanted}
+    # Keep only the specified stocks if configured
+    if cfg.stocks:
+        wanted = set(cfg.stocks.values())
+        out = {k: v for k, v in out.items() if k in wanted}
 
     if len(out) == 0:
         raise ValueError("Loaded 0 target stocks. Check filenames & mapping.")
@@ -301,21 +250,6 @@ def label_vconfirm(d: pd.DataFrame, cfg: Config) -> pd.Series:
     return pd.Series(y.astype(int), index=d.index)
 
 
-# -----------------------------
-# 6) Build dataset (stack 8 stocks)
-# -----------------------------
-FEATURE_COLS = [
-    "ret1","ret5","ret10","ret22",
-    "vol_ratio_5_22",
-    "atr14",
-    "dist_ma5","dist_ma10","dist_ma20",
-    "ma5_ma20",
-    "dd22","rebound_from_min",
-    "range_amp","pct_pos",
-    "slope22","volatility22",
-    "body","upper_shadow","lower_shadow"
-]
-
 def build_samples(universe: Dict[str, pd.DataFrame], cfg: Config) -> pd.DataFrame:
     rows = []
     for code, df in universe.items():
@@ -335,9 +269,9 @@ def build_samples(universe: Dict[str, pd.DataFrame], cfg: Config) -> pd.DataFram
         d["ts_code"] = code
 
         # drop early NaNs caused by rolling
-        d = d.dropna(subset=FEATURE_COLS + ["y"]).copy()
+        d = d.dropna(subset=cfg.feature_cols + ["y"]).copy()
 
-        rows.append(d[["trade_date","ts_code","y"] + FEATURE_COLS])
+        rows.append(d[["trade_date","ts_code","y"] + cfg.feature_cols])
 
     if not rows:
         raise ValueError("No usable stocks after filtering; check data length/columns.")
@@ -365,28 +299,21 @@ def time_split(df: pd.DataFrame, test_years: int = 1) -> Tuple[pd.DataFrame, pd.
 # 8) Train & evaluate
 # -----------------------------
 def train_xgb(train: pd.DataFrame, test: pd.DataFrame, cfg: Config) -> Pipeline:
-    X_train = train[FEATURE_COLS].values
+    X_train = train[cfg.feature_cols].values
     y_train = train["y"].values.astype(int)
-    X_test = test[FEATURE_COLS].values
+    X_test = test[cfg.feature_cols].values
     y_test = test["y"].values.astype(int)
 
     # RobustScaler helps with outliers
-    model = XGBClassifier(
-        n_estimators=500,
-        max_depth=4,
-        learning_rate=0.03,
-        subsample=0.9,
-        colsample_bytree=0.9,
-        reg_lambda=1.0,
-        objective="multi:softprob",
-        num_class=3,
-        random_state=cfg.random_state,
-        eval_metric="mlogloss",
-        n_jobs=4
-    )
+    params = dict(cfg.xgb_params)
+    params.setdefault("random_state", cfg.random_state)
+    model = XGBClassifier(**params)
 
     pipe = Pipeline([
-        ("scaler", RobustScaler(with_centering=True, with_scaling=True)),
+        ("scaler", RobustScaler(
+            with_centering=cfg.scaler_with_centering,
+            with_scaling=cfg.scaler_with_scaling
+        )),
         ("clf", model),
     ])
 
@@ -403,7 +330,7 @@ def train_xgb(train: pd.DataFrame, test: pd.DataFrame, cfg: Config) -> Pipeline:
     # show a few feature importances (after scaling, importances are from XGB)
     clf = pipe.named_steps["clf"]
     importances = clf.feature_importances_
-    imp_df = pd.DataFrame({"feature": FEATURE_COLS, "importance": importances}).sort_values("importance", ascending=False)
+    imp_df = pd.DataFrame({"feature": cfg.feature_cols, "importance": importances}).sort_values("importance", ascending=False)
     print("\n=== Top Feature Importances ===")
     print(imp_df.head(12).to_string(index=False))
 
@@ -411,7 +338,13 @@ def train_xgb(train: pd.DataFrame, test: pd.DataFrame, cfg: Config) -> Pipeline:
 
 
 def main():
-    universe = load_universe(CFG.data_dir)
+    if CFG.auto_fetch:
+        fetch_daily_data(
+            data_dir=CFG.data_dir,
+            start_date=CFG.fetch_start_date,
+            pool=StockPool(stocks=dict(CFG.stocks)),
+        )
+    universe = load_universe(CFG)
     ds = build_samples(universe, CFG)
     train, test = time_split(ds, test_years=CFG.test_years)
 
@@ -423,7 +356,7 @@ def main():
 
     # example: latest day prediction per stock
     latest = ds.sort_values("trade_date").groupby("ts_code").tail(1)
-    proba = pipe.predict_proba(latest[FEATURE_COLS].values)
+    proba = pipe.predict_proba(latest[CFG.feature_cols].values)
     pred = np.argmax(proba, axis=1)
 
     out = latest[["trade_date","ts_code"]].copy()
